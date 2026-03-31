@@ -1,0 +1,50 @@
+# =============================================================================
+# .dockerignore — LongCat-Video Avatar
+# =============================================================================
+
+# Git
+.git
+.gitignore
+
+# Python caches
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.eggs
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output / temp (will be created at runtime)
+outputs/
+audio_temp/
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+
+# Documentation (not needed in image)
+*.md
+LICENSE
+
+# Build / deploy helper scripts
+build.sh
+push.sh
+test_local.sh
+
+# NOTE: We do NOT ignore repo/weights/ — they are baked into the image.
+# If you prefer runtime download, add:  repo/weights/

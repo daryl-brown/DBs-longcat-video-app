@@ -1,0 +1,61 @@
+# =============================================================================
+# LongCat-Video Avatar — Python Dependencies
+# =============================================================================
+# Core ML / Deep Learning
+torch==2.6.0
+torchaudio==2.6.0
+torchvision==0.21.0
+
+# Diffusion / Transformers
+diffusers==0.35.1
+transformers==4.41.0
+accelerate>=0.30.0
+safetensors>=0.4.0
+einops==0.8.0
+
+# Flash Attention (pre-built for CUDA 12.4)
+flash-attn==2.7.4.post1
+
+# Audio processing
+librosa==0.11.0
+soundfile==0.13.1
+soxr==0.5.0.post1
+audio-separator==0.30.2
+pyloudnorm==0.1.1
+
+# Video / Image processing
+opencv-python==4.9.0.80
+imageio==2.37.0
+imageio-ffmpeg==0.6.0
+av==12.0.0
+Pillow>=10.0.0
+
+# Web UI
+gradio>=4.44.0
+
+# Utilities
+numpy==1.26.4
+loguru==0.7.2
+ftfy==6.2.0
+psutil==6.0.0
+scikit-learn==1.6.1
+scikit-image==0.25.2
+scipy==1.15.3
+sympy==1.13.1
+pyarrow>=14.0.0
+
+# ONNX (for vocal separator)
+onnx==1.18.0
+onnxruntime==1.16.3
+
+# RunPod serverless
+runpod>=1.6.0
+
+# HuggingFace Hub for model downloads
+huggingface_hub>=0.20.0
+
+# Misc
+nvidia-ml-py>=12.0.0
+cffi>=1.16.0
+chardet>=5.0.0
+requests>=2.31.0

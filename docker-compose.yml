@@ -1,0 +1,58 @@
+# =============================================================================
+# docker-compose.yml — Local testing for LongCat-Video Avatar
+# =============================================================================
+# Usage:
+#   docker compose up              # Gradio UI mode
+#   docker compose up serverless   # RunPod serverless handler mode
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ----------- Gradio UI (default for RunPod Pods) --------------------------
+  gradio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: longcat-video:latest
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7860
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./outputs:/app/outputs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: ["python3", "app.py"]
+
+  # ----------- Serverless handler -------------------------------------------
+  serverless:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: longcat-video:latest
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./outputs:/app/outputs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: ["python3", "handler.py"]
+    profiles:
+      - serverless
