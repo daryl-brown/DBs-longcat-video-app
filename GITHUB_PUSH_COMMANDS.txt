@@ -1,0 +1,82 @@
+================================================================================
+  GITHUB PUSH COMMANDS — LongCat-Video Avatar
+================================================================================
+
+Follow these steps to push your code to GitHub.
+Model weights (67GB) are NOT included — they're downloaded during Docker build.
+
+--------------------------------------------------------------------------------
+STEP 1: Create a GitHub Repository
+--------------------------------------------------------------------------------
+
+  1. Go to: https://github.com/new
+  2. Repository name: longcat-video-serverless
+  3. Visibility: Private (recommended)
+  4. Do NOT initialize with README (we already have one)
+  5. Click "Create repository"
+
+--------------------------------------------------------------------------------
+STEP 2: Push Your Code
+--------------------------------------------------------------------------------
+
+Run these commands from the project directory:
+
+  cd /home/ubuntu/longcat_video_app
+
+  # Set your Git identity (if not already set)
+  git config user.name "Your Name"
+  git config user.email "your-email@example.com"
+
+  # Add the GitHub remote
+  git remote add origin https://github.com/YOUR_USERNAME/longcat-video-serverless.git
+
+  # If remote already exists, update it:
+  # git remote set-url origin https://github.com/YOUR_USERNAME/longcat-video-serverless.git
+
+  # Push to GitHub
+  git branch -M main
+  git push -u origin main
+
+--------------------------------------------------------------------------------
+STEP 3: Verify
+--------------------------------------------------------------------------------
+
+  1. Go to: https://github.com/YOUR_USERNAME/longcat-video-serverless
+  2. You should see all files EXCEPT the repo/weights/ directory
+  3. The Dockerfile is set to download weights from HuggingFace during build
+
+--------------------------------------------------------------------------------
+WHAT GETS PUSHED (and what doesn't)
+--------------------------------------------------------------------------------
+
+  ✅ PUSHED to GitHub:
+     - handler.py          (RunPod serverless handler)
+     - app.py              (Gradio UI)
+     - Dockerfile           (builds image + downloads weights)
+     - requirements.txt     (Python dependencies)
+     - docker-compose.yml   (local testing)
+     - repo/longcat_video/  (model source code)
+     - repo/LICENSE
+     - repo/README.md
+     - README.md            (project README)
+     - RUNPOD_SERVERLESS_SETUP.md
+     - build.sh, push.sh, test_local.sh
+
+  ❌ NOT pushed (git-ignored):
+     - repo/weights/        (67GB — downloaded during Docker build)
+     - outputs/             (generated videos)
+     - audio_temp/          (temporary audio files)
+     - *.pdf                (generated docs)
+     - __pycache__/         (Python cache)
+
+--------------------------------------------------------------------------------
+NOTES
+--------------------------------------------------------------------------------
+
+  - Replace YOUR_USERNAME with your actual GitHub username
+  - If you get authentication errors, use a Personal Access Token:
+    https://github.com/settings/tokens
+    Then use: git remote set-url origin https://TOKEN@github.com/USER/REPO.git
+  - Total repo size on GitHub: ~50-100 MB (code only, no weights)
+
+================================================================================

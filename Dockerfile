@@ -1,12 +1,12 @@
 # =============================================================================
-# Dockerfile — LongCat-Video Avatar  (RunPod / A100 optimised)
+# Dockerfile — LongCat-Video Avatar  (RunPod Serverless / A100 optimised)
 # =============================================================================
 # Two-stage build:
-#   Stage 1  "builder"  — install Python deps in a venv
+#   Stage 1  "builder"  — install Python deps + download model weights
 #   Stage 2  "runtime"  — lean image with only what we need
 #
-# Expected build context: /home/ubuntu/longcat_video_app
-# The repo/ directory (including weights/) must be present.
+# Model weights are downloaded from HuggingFace during build.
+# They are NOT expected to be in the Git repository.
 # =============================================================================
 
 # --------------- Stage 1: builder -------------------------------------------
@@ -42,6 +42,22 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt 2>/dev/null || \
     pip install --no-cache-dir -r /tmp/requirements.txt --ignore-installed torch torchaudio torchvision
 
+# Install huggingface-cli for model downloads
+RUN pip install --no-cache-dir huggingface_hub
+
+# --------------- Download model weights from HuggingFace --------------------
+RUN mkdir -p /weights/LongCat-Video /weights/LongCat-Video-Avatar
+
+# Download base model components (tokenizer, text_encoder, vae, scheduler)
+RUN huggingface-cli download meituan-longcat/LongCat-Video \
+    --local-dir /weights/LongCat-Video \
+    --include "tokenizer/*" "text_encoder/*" "vae/*" "scheduler/*"
+
+# Download avatar model components
+RUN huggingface-cli download meituan-longcat/LongCat-Video-Avatar \
+    --local-dir /weights/LongCat-Video-Avatar \
+    --include "avatar_single/*" "chinese-wav2vec2-base/*" "vocal_separator/*"
+
 # --------------- Stage 2: runtime -------------------------------------------
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
 
@@ -63,9 +79,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Application directory
 WORKDIR /app
 
-# Copy application code
+# Copy application code (repo source code, NOT weights)
 COPY app.py handler.py ./
 COPY repo/ ./repo/
+
+# Copy downloaded weights into the expected location
+COPY --from=builder /weights/LongCat-Video     ./repo/weights/LongCat-Video/
+COPY --from=builder /weights/LongCat-Video-Avatar ./repo/weights/LongCat-Video-Avatar/
 
 # Pre-create output dirs
 RUN mkdir -p /app/outputs /app/audio_temp
@@ -77,5 +97,5 @@ EXPOSE 7860
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:7860/ || exit 1
 
-# Default: run the Gradio app  (override with handler.py for serverless)
-CMD ["python3", "app.py"]
+# Default: run serverless handler (for RunPod Serverless)
+CMD ["python3", "handler.py"]

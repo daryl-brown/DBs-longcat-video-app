@@ -2,7 +2,7 @@
 # .dockerignore — LongCat-Video Avatar
 # =============================================================================
 
-# Git
+# Version control
 .git
 .gitignore
 
@@ -10,41 +10,41 @@
 __pycache__
 *.pyc
 *.pyo
-*.egg-info
-.eggs
 
 # Virtual environments
 venv/
 .venv/
-env/
 
-# IDE / Editor
+# IDE files
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 
-# Output / temp (will be created at runtime)
+# Output directories (not needed in build)
 outputs/
 audio_temp/
 
-# Docker files themselves
-Dockerfile
-docker-compose.yml
-
-# Documentation (not needed in image)
-*.md
-LICENSE
-
-# Build / deploy helper scripts
+# Build/deploy scripts (not needed in image)
 build.sh
 push.sh
 test_local.sh
+deploy_from_deepagent.sh
 
-# NOTE: We do NOT ignore repo/weights/ — they are baked into the image.
-# If you prefer runtime download, add:  repo/weights/
+# Documentation (not needed in image)
+*.md
+*.pdf
+*.txt
+LICENSE
+GITHUB_PUSH_COMMANDS.txt
+
+# Docker compose (not needed in image)
+docker-compose.yml
+
+# Model weights (downloaded during build from HuggingFace, NOT from repo)
+repo/weights/
+
+# Misc
+.abacus.donotdelete

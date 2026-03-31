@@ -1,4 +1,67 @@
-repo/
+# =============================================================================
+# .gitignore — LongCat-Video Avatar (RunPod Serverless)
+# =============================================================================
+
+# ---- Model weights (downloaded during Docker build, NOT stored in Git) ------
+repo/weights/
+*.ckpt
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# ---- Python cache -----------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+
+# ---- Virtual environments ---------------------------------------------------
+venv/
+.venv/
+env/
+.env/
+
+# ---- Output / temp directories ----------------------------------------------
 outputs/
 audio_temp/
+tmp/
+temp/
+
+# ---- IDE / editor files -----------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# ---- OS files ---------------------------------------------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---- PDFs (generated docs) --------------------------------------------------
 *.pdf
+
+# ---- Docker local build artifacts -------------------------------------------
+*.tar
+*.tar.gz
+
+# ---- Logs -------------------------------------------------------------------
+*.log
+logs/
+
+# ---- Jupyter ----------------------------------------------------------------
+.ipynb_checkpoints/
+
+# ---- Misc -------------------------------------------------------------------
+.abacus.donotdelete
