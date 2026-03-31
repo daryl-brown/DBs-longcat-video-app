@@ -13,9 +13,6 @@ accelerate>=0.30.0
 safetensors>=0.4.0
 einops==0.8.0
 
-# Flash Attention (pre-built for CUDA 12.4)
-flash-attn==2.7.4.post1
-
 # Audio processing
 librosa==0.11.0
 soundfile==0.13.1
