@@ -37,6 +37,7 @@ deploy_from_deepagent.sh
 *.md
 *.pdf
 *.txt
+!requirements.txt
 LICENSE
 GITHUB_PUSH_COMMANDS.txt
 
