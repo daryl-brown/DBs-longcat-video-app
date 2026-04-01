@@ -2,11 +2,11 @@
 # Dockerfile — LongCat-Video Avatar  (RunPod Serverless / A100 optimised)
 # =============================================================================
 # Two-stage build:
-#   Stage 1  "builder"  — install Python deps + download model weights
+#   Stage 1  "builder"  — install Python deps
 #   Stage 2  "runtime"  — lean image with only what we need
 #
-# Model weights are downloaded from HuggingFace during build.
-# They are NOT expected to be in the Git repository.
+# Model weights are NOT baked into the image.
+# They are downloaded from HuggingFace on first cold start by handler.py.
 # =============================================================================
 
 # --------------- Stage 1: builder -------------------------------------------
@@ -39,22 +39,6 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt 2>/dev/null || \
     pip install --no-cache-dir -r /tmp/requirements.txt --ignore-installed torch torchaudio torchvision
 
-# Install huggingface-cli for model downloads
-RUN pip install --no-cache-dir huggingface_hub
-
-# --------------- Download model weights from HuggingFace --------------------
-RUN mkdir -p /weights/LongCat-Video /weights/LongCat-Video-Avatar
-
-# Download base model components (tokenizer, text_encoder, vae, scheduler)
-RUN huggingface-cli download meituan-longcat/LongCat-Video \
-    --local-dir /weights/LongCat-Video \
-    --include "tokenizer/*" "text_encoder/*" "vae/*" "scheduler/*"
-
-# Download avatar model components
-RUN huggingface-cli download meituan-longcat/LongCat-Video-Avatar \
-    --local-dir /weights/LongCat-Video-Avatar \
-    --include "avatar_single/*" "chinese-wav2vec2-base/*" "vocal_separator/*"
-
 # --------------- Stage 2: runtime -------------------------------------------
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
 
@@ -80,12 +64,8 @@ WORKDIR /app
 COPY app.py handler.py ./
 COPY repo/ ./repo/
 
-# Copy downloaded weights into the expected location
-COPY --from=builder /weights/LongCat-Video     ./repo/weights/LongCat-Video/
-COPY --from=builder /weights/LongCat-Video-Avatar ./repo/weights/LongCat-Video-Avatar/
-
-# Pre-create output dirs
-RUN mkdir -p /app/outputs /app/audio_temp
+# Pre-create output and weights dirs
+RUN mkdir -p /app/outputs /app/audio_temp /app/repo/weights/LongCat-Video /app/repo/weights/LongCat-Video-Avatar
 
 # Expose Gradio port
 EXPOSE 7860

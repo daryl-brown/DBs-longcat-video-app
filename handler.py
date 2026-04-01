@@ -63,11 +63,34 @@ _vocal_separator = None
 _device = None
 
 
+def _ensure_weights():
+    """Download model weights from HuggingFace if not already present."""
+    from huggingface_hub import snapshot_download
+
+    if not os.path.isdir(os.path.join(BASE_MODEL_DIR, "tokenizer")):
+        print("[handler] Downloading LongCat-Video base model weights …")
+        snapshot_download(
+            "meituan-longcat/LongCat-Video",
+            local_dir=BASE_MODEL_DIR,
+            allow_patterns=["tokenizer/*", "text_encoder/*", "vae/*", "scheduler/*"],
+        )
+
+    if not os.path.isdir(os.path.join(AVATAR_MODEL_DIR, "avatar_single")):
+        print("[handler] Downloading LongCat-Video-Avatar model weights …")
+        snapshot_download(
+            "meituan-longcat/LongCat-Video-Avatar",
+            local_dir=AVATAR_MODEL_DIR,
+            allow_patterns=["avatar_single/*", "chinese-wav2vec2-base/*", "vocal_separator/*"],
+        )
+
+
 def _load_pipeline():
     """Load model pipeline into GPU — called once at cold start."""
     global _pipeline, _vocal_separator, _device
     if _pipeline is not None:
         return
+
+    _ensure_weights()
 
     import torch
     from transformers import AutoTokenizer, Wav2Vec2FeatureExtractor
