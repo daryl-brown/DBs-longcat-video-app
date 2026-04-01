@@ -34,10 +34,6 @@ RUN pip install --no-cache-dir \
     torchvision==0.21.0+cu124 \
     --index-url https://download.pytorch.org/whl/cu124
 
-# Install flash-attn via pre-built wheel (avoids long compilation; matched to cu124 + torch2.6 + py3.10)
-RUN pip install --no-cache-dir \
-    "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu124torch2.6cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"
-
 # Install remaining deps
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt 2>/dev/null || \
