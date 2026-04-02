@@ -204,6 +204,10 @@ def handler(event):
 
         data = event.get("input", {})
 
+        # Warmup request — weights downloaded, pipeline loaded, nothing to generate
+        if data.get("warmup"):
+            return {"status": "warm", "message": "Worker is ready"}
+
         # --- Decode inputs ------------------------------------------------
         image_path = _decode_input(data, "image", ".png")
         audio_path = _decode_input(data, "audio", ".wav")
