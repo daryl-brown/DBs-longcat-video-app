@@ -94,7 +94,6 @@ def _load_pipeline():
 
     import torch
     from transformers import AutoTokenizer, Wav2Vec2FeatureExtractor
-    from diffusers import load_image  # noqa: F401
     from longcat_video.modules.scheduler_flow_match_euler import FlowMatchEulerDiscreteScheduler
     from longcat_video.modules.autoencoder_kl_wan import AutoencoderKLWan
     from longcat_video.modules.model_avatar import LongCatVideoAvatarTransformer3DModel
