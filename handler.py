@@ -44,7 +44,11 @@ import runpod
 # ---------------------------------------------------------------------------
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.join(APP_DIR, "repo")
-WEIGHTS_DIR = os.path.join(REPO_DIR, "weights")
+
+# Use network volume if mounted (RunPod always mounts at /runpod-volume),
+# otherwise fall back to the local weights directory.
+_VOLUME_DIR = "/runpod-volume"
+WEIGHTS_DIR = _VOLUME_DIR if os.path.isdir(_VOLUME_DIR) else os.path.join(REPO_DIR, "weights")
 BASE_MODEL_DIR = os.path.join(WEIGHTS_DIR, "LongCat-Video")
 AVATAR_MODEL_DIR = os.path.join(WEIGHTS_DIR, "LongCat-Video-Avatar")
 OUTPUT_DIR = os.path.join(APP_DIR, "outputs")
