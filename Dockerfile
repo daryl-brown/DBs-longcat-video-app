@@ -34,6 +34,9 @@ RUN pip install --no-cache-dir \
     torchvision==0.21.0+cu124 \
     --index-url https://download.pytorch.org/whl/cu124
 
+# Clone LongCat-Video source code (provides the longcat_video Python package)
+RUN git clone --depth 1 https://github.com/meituan-longcat/LongCat-Video /opt/longcat-repo
+
 # Install remaining deps
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt 2>/dev/null || \
@@ -63,9 +66,11 @@ WORKDIR /app
 # Pre-create output and weights dirs (v2)
 RUN mkdir -p /app/outputs /app/audio_temp /app/repo/weights/LongCat-Video /app/repo/weights/LongCat-Video-Avatar
 
-# Copy application code (repo source code, NOT weights)
-# cache-bust: 2026-04-07
+# Copy application code
 COPY app.py handler.py ./
+
+# Copy longcat_video source package from builder
+COPY --from=builder /opt/longcat-repo /app/repo
 
 # Expose Gradio port
 EXPOSE 7860
