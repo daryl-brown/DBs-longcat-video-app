@@ -61,6 +61,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 
 # Copy application code (repo source code, NOT weights)
+# cache-bust: 2026-04-07
 COPY app.py handler.py ./
 COPY repo/ ./repo/
 
