@@ -98,9 +98,9 @@ def _load_pipeline():
 
     import torch
     from transformers import AutoTokenizer, Wav2Vec2FeatureExtractor
-    from longcat_video.modules.scheduler_flow_match_euler import FlowMatchEulerDiscreteScheduler
+    from longcat_video.modules.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
     from longcat_video.modules.autoencoder_kl_wan import AutoencoderKLWan
-    from longcat_video.modules.model_avatar import LongCatVideoAvatarTransformer3DModel
+    from longcat_video.modules.avatar.longcat_video_dit_avatar import LongCatVideoAvatarTransformer3DModel
     from longcat_video.pipeline_longcat_video_avatar import LongCatVideoAvatarPipeline
     from longcat_video.context_parallel.context_parallel_util import setup_cp
     from longcat_video.audio_process.wav2vec2 import Wav2Vec2ModelWrapper
