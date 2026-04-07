@@ -60,13 +60,12 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Application directory
 WORKDIR /app
 
+# Pre-create output and weights dirs (v2)
+RUN mkdir -p /app/outputs /app/audio_temp /app/repo/weights/LongCat-Video /app/repo/weights/LongCat-Video-Avatar
+
 # Copy application code (repo source code, NOT weights)
 # cache-bust: 2026-04-07
 COPY app.py handler.py ./
-COPY repo/ ./repo/
-
-# Pre-create output and weights dirs
-RUN mkdir -p /app/outputs /app/audio_temp /app/repo/weights/LongCat-Video /app/repo/weights/LongCat-Video-Avatar
 
 # Expose Gradio port
 EXPOSE 7860
