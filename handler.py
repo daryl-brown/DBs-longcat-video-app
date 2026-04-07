@@ -157,7 +157,7 @@ def _load_pipeline():
         output_dir=AUDIO_TEMP_DIR,
         model_file_dir=os.path.join(AVATAR_MODEL_DIR, "vocal_separator"),
     )
-    _vocal_separator.load_model("UVR-MDX-NET-Inst_HQ_3.onnx")
+    _vocal_separator.load_model("Kim_Vocal_2.onnx")
 
     print("[handler] Pipeline ready ✔")
 
