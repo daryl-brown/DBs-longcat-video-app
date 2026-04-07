@@ -10,13 +10,12 @@ Accepts:
       "prompt":      "optional text prompt",
       "neg_prompt":  "optional negative prompt",
       "resolution":  "480p" | "720p"  (default "480p"),
-      "aspect_ratio": "16:9" | "9:16" (default "16:9"),
       "mode":        "ai2v" | "at2v"  (default "ai2v"),
-      "num_inference_steps": 30,
-      "guidance_scale": 5.0,
-      "audio_guidance_scale": 3.0,
+      "num_inference_steps": 50,
+      "text_guidance_scale": 4.0,
+      "audio_guidance_scale": 4.0,
       "seed":        42,
-      "continuation_segments": 2
+      "num_segments": 1
     }
   }
 
@@ -30,28 +29,29 @@ Returns:
 
 import os
 import sys
+import math
 import base64
 import tempfile
 import traceback
 import time
-import io
 import requests
+import numpy as np
+from pathlib import Path
 
 import runpod
 
 # ---------------------------------------------------------------------------
-# Paths — same layout as the Gradio app
+# Paths
 # ---------------------------------------------------------------------------
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_DIR  = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.join(APP_DIR, "repo")
 
-# Use network volume if mounted (RunPod always mounts at /runpod-volume),
-# otherwise fall back to the local weights directory.
+# Use network volume if mounted (RunPod always mounts at /runpod-volume)
 _VOLUME_DIR = "/runpod-volume"
-WEIGHTS_DIR = _VOLUME_DIR if os.path.isdir(_VOLUME_DIR) else os.path.join(REPO_DIR, "weights")
-BASE_MODEL_DIR = os.path.join(WEIGHTS_DIR, "LongCat-Video")
+WEIGHTS_DIR    = _VOLUME_DIR if os.path.isdir(_VOLUME_DIR) else os.path.join(REPO_DIR, "weights")
+BASE_MODEL_DIR  = os.path.join(WEIGHTS_DIR, "LongCat-Video")
 AVATAR_MODEL_DIR = os.path.join(WEIGHTS_DIR, "LongCat-Video-Avatar")
-OUTPUT_DIR = os.path.join(APP_DIR, "outputs")
+OUTPUT_DIR     = os.path.join(APP_DIR, "outputs")
 AUDIO_TEMP_DIR = os.path.join(APP_DIR, "audio_temp")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -60,13 +60,29 @@ os.makedirs(AUDIO_TEMP_DIR, exist_ok=True)
 sys.path.insert(0, REPO_DIR)
 
 # ---------------------------------------------------------------------------
-# Global pipeline (loaded once, reused across requests)
+# Globals — loaded once, reused across requests
 # ---------------------------------------------------------------------------
-_pipeline = None
+_pipeline        = None
 _vocal_separator = None
-_device = None
+_local_rank      = 0
+
+SAVE_FPS     = 16
+AUDIO_STRIDE = 2
+NUM_FRAMES   = 93
+NUM_COND_FRAMES = 13
+
+NEG_PROMPT = (
+    "Close-up, Bright tones, overexposed, static, blurred details, subtitles, "
+    "style, works, paintings, images, static, overall gray, worst quality, low quality, "
+    "JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, "
+    "poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, "
+    "still picture, messy background, three legs, many people in the background, walking backwards"
+)
 
 
+# ---------------------------------------------------------------------------
+# Weight download
+# ---------------------------------------------------------------------------
 def _ensure_weights():
     """Download model weights from HuggingFace if not already present."""
     from huggingface_hub import snapshot_download
@@ -88,49 +104,76 @@ def _ensure_weights():
         )
 
 
+# ---------------------------------------------------------------------------
+# Pipeline load
+# ---------------------------------------------------------------------------
 def _load_pipeline():
     """Load model pipeline into GPU — called once at cold start."""
-    global _pipeline, _vocal_separator, _device
+    global _pipeline, _vocal_separator, _local_rank
+
     if _pipeline is not None:
         return
 
     _ensure_weights()
 
     import torch
-    from transformers import AutoTokenizer, Wav2Vec2FeatureExtractor
+    import torch.distributed as dist
+    from transformers import AutoTokenizer, UMT5EncoderModel, Wav2Vec2FeatureExtractor
     from longcat_video.modules.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
     from longcat_video.modules.autoencoder_kl_wan import AutoencoderKLWan
     from longcat_video.modules.avatar.longcat_video_dit_avatar import LongCatVideoAvatarTransformer3DModel
     from longcat_video.pipeline_longcat_video_avatar import LongCatVideoAvatarPipeline
-    from longcat_video.context_parallel.context_parallel_util import setup_cp
+    from longcat_video.context_parallel import context_parallel_util
     from longcat_video.audio_process.wav2vec2 import Wav2Vec2ModelWrapper
     from audio_separator.separator import Separator
 
-    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _local_rank = 0 if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16
 
+    # Single-process distributed init (required by context_parallel internals)
+    if not dist.is_initialized():
+        os.environ.setdefault("RANK", "0")
+        os.environ.setdefault("WORLD_SIZE", "1")
+        os.environ.setdefault("MASTER_ADDR", "localhost")
+        os.environ.setdefault("MASTER_PORT", "29500")
+        dist.init_process_group(backend="nccl", init_method="env://")
+
+    context_parallel_util.init_context_parallel(
+        context_parallel_size=1, global_rank=0, world_size=1
+    )
+    cp_size    = context_parallel_util.get_cp_size()
+    cp_split_hw = context_parallel_util.get_optimal_split(cp_size)
+
     print("[handler] Loading tokenizer …")
-    tokenizer = AutoTokenizer.from_pretrained(os.path.join(BASE_MODEL_DIR, "tokenizer"))
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_DIR, subfolder="tokenizer")
 
     print("[handler] Loading text encoder …")
-    from transformers import UMT5EncoderModel
     text_encoder = UMT5EncoderModel.from_pretrained(
-        os.path.join(BASE_MODEL_DIR, "text_encoder"), torch_dtype=dtype
+        BASE_MODEL_DIR, subfolder="text_encoder", torch_dtype=dtype
     )
 
     print("[handler] Loading VAE …")
     vae = AutoencoderKLWan.from_pretrained(
-        os.path.join(BASE_MODEL_DIR, "vae"), torch_dtype=torch.float32
+        BASE_MODEL_DIR, subfolder="vae", torch_dtype=torch.float32
     )
 
     print("[handler] Loading scheduler …")
     scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
-        os.path.join(BASE_MODEL_DIR, "scheduler")
+        BASE_MODEL_DIR, subfolder="scheduler"
     )
 
-    print("[handler] Loading transformer …")
-    transformer = LongCatVideoAvatarTransformer3DModel.from_pretrained(
-        os.path.join(AVATAR_MODEL_DIR, "avatar_single"), torch_dtype=dtype
+    print("[handler] Loading transformer (dit) …")
+    dit = LongCatVideoAvatarTransformer3DModel.from_pretrained(
+        AVATAR_MODEL_DIR, subfolder="avatar_single",
+        cp_split_hw=cp_split_hw, torch_dtype=dtype
+    )
+
+    print("[handler] Loading Wav2Vec2 …")
+    wav2vec_path = os.path.join(AVATAR_MODEL_DIR, "chinese-wav2vec2-base")
+    audio_encoder = Wav2Vec2ModelWrapper(wav2vec_path).to(_local_rank)
+    audio_encoder.feature_extractor._freeze_parameters()
+    wav2vec_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
+        wav2vec_path, local_files_only=True
     )
 
     print("[handler] Building pipeline …")
@@ -138,36 +181,35 @@ def _load_pipeline():
         tokenizer=tokenizer,
         text_encoder=text_encoder,
         vae=vae,
-        transformer=transformer,
         scheduler=scheduler,
+        dit=dit,
+        audio_encoder=audio_encoder,
+        wav2vec_feature_extractor=wav2vec_feature_extractor,
     )
-    _pipeline = _pipeline.to(_device, dtype=dtype)
-
-    print("[handler] Loading Wav2Vec2 …")
-    wav2vec_path = os.path.join(AVATAR_MODEL_DIR, "chinese-wav2vec2-base")
-    audio_processor = Wav2Vec2FeatureExtractor.from_pretrained(wav2vec_path)
-    audio_encoder = Wav2Vec2ModelWrapper.from_pretrained(wav2vec_path)
-    _pipeline.audio_encoder = audio_encoder.to(_device, dtype=dtype)
-    _pipeline.audio_processor = audio_processor
-
-    setup_cp(cp_size=1)
+    _pipeline.to(_local_rank)
 
     print("[handler] Loading vocal separator …")
+    vocal_separator_model = os.path.join(AVATAR_MODEL_DIR, "vocal_separator", "Kim_Vocal_2.onnx")
+    vocals_dir = Path(AUDIO_TEMP_DIR) / "vocals"
+    os.makedirs(vocals_dir, exist_ok=True)
     _vocal_separator = Separator(
-        output_dir=AUDIO_TEMP_DIR,
-        model_file_dir=os.path.join(AVATAR_MODEL_DIR, "vocal_separator"),
+        output_dir=vocals_dir,
+        output_single_stem="vocals",
+        model_file_dir=os.path.dirname(vocal_separator_model),
     )
-    _vocal_separator.load_model("Kim_Vocal_2.onnx")
+    _vocal_separator.load_model(os.path.basename(vocal_separator_model))
 
     print("[handler] Pipeline ready ✔")
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 def _decode_input(data, key, suffix):
     """Decode a base64 string or download a URL to a temp file."""
     value = data.get(key)
     if value is None:
         raise ValueError(f"Missing required input: {key}")
-
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=AUDIO_TEMP_DIR)
     if value.startswith(("http://", "https://")):
         r = requests.get(value, timeout=120)
@@ -180,26 +222,35 @@ def _decode_input(data, key, suffix):
 
 
 def _extract_vocal(audio_path):
-    """Extract vocal track from audio."""
-    results = _vocal_separator.separate(audio_path)
-    vocal_path = None
-    for r in results:
-        full = os.path.join(AUDIO_TEMP_DIR, r)
-        if "vocal" in r.lower() or "vocals" in r.lower():
-            vocal_path = full
-    return vocal_path or audio_path
+    """Separate vocal track and return path to vocal file."""
+    import librosa, soundfile as sf
+    outputs = _vocal_separator.separate(audio_path)
+    if not outputs:
+        return audio_path  # fallback: use raw audio
+    vocals_dir = Path(AUDIO_TEMP_DIR) / "vocals"
+    vocal_file = vocals_dir / outputs[0]
+    target = os.path.join(AUDIO_TEMP_DIR, f"vocal_{int(time.time())}.wav")
+    os.rename(str(vocal_file), target)
+    return target
+
+
+def _build_audio_emb(full_audio_emb, segment_idx, device):
+    """Build windowed audio embedding for a given segment."""
+    import torch
+    indices = torch.arange(2 * 2 + 1) - 2  # [-2, -1, 0, 1, 2]
+    audio_start_idx = segment_idx * AUDIO_STRIDE * (NUM_FRAMES - NUM_COND_FRAMES)
+    audio_end_idx   = audio_start_idx + AUDIO_STRIDE * NUM_FRAMES
+    center_indices  = (
+        torch.arange(audio_start_idx, audio_end_idx, AUDIO_STRIDE).unsqueeze(1)
+        + indices.unsqueeze(0)
+    )
+    center_indices = torch.clamp(center_indices, min=0, max=full_audio_emb.shape[0] - 1)
+    return full_audio_emb[center_indices][None, ...].to(device)
 
 
 # ---------------------------------------------------------------------------
-# Resolution helpers
+# Handler
 # ---------------------------------------------------------------------------
-RES_MAP = {
-    "480p": {"16:9": (832, 480), "9:16": (480, 832)},
-    "720p": {"16:9": (1280, 720), "9:16": (720, 1280)},
-    "1080p": {"16:9": (1920, 1080), "9:16": (1080, 1920)},
-}
-
-
 def handler(event):
     """RunPod serverless handler."""
     try:
@@ -207,95 +258,123 @@ def handler(event):
 
         data = event.get("input", {})
 
-        # Warmup request — weights downloaded, pipeline loaded, nothing to generate
+        # Warmup — pipeline loaded, nothing to generate
         if data.get("warmup"):
             return {"status": "warm", "message": "Worker is ready"}
 
-        # --- Decode inputs ------------------------------------------------
+        import torch
+        import librosa
+        import PIL.Image
+        from longcat_video.audio_process.torch_utils import save_video_ffmpeg
+
+        # --- Decode inputs --------------------------------------------------
         image_path = _decode_input(data, "image", ".png")
         audio_path = _decode_input(data, "audio", ".wav")
 
-        # --- Parameters ---------------------------------------------------
-        resolution = data.get("resolution", "480p")
-        aspect = data.get("aspect_ratio", "16:9")
-        mode = data.get("mode", "ai2v")
-        steps = int(data.get("num_inference_steps", 30))
-        guidance = float(data.get("guidance_scale", 5.0))
-        audio_guidance = float(data.get("audio_guidance_scale", 3.0))
-        seed = int(data.get("seed", 42))
-        continuation_segments = int(data.get("continuation_segments", 2))
-        prompt = data.get("prompt", "")
-        neg_prompt = data.get("neg_prompt", "")
+        # --- Parameters -----------------------------------------------------
+        resolution    = data.get("resolution", "480p")
+        mode          = data.get("mode", "ai2v")
+        steps         = int(data.get("num_inference_steps", 50))
+        text_guidance = float(data.get("text_guidance_scale", 4.0))
+        audio_guidance = float(data.get("audio_guidance_scale", 4.0))
+        seed          = int(data.get("seed", 42))
+        num_segments  = max(1, int(data.get("num_segments", 1)))
+        prompt        = data.get("prompt", "")
+        neg_prompt    = data.get("neg_prompt", NEG_PROMPT)
 
-        w, h = RES_MAP.get(resolution, RES_MAP["480p"]).get(aspect, (832, 480))
+        if resolution == "720p":
+            h, w = 768, 1280
+        else:
+            h, w = 480, 832
 
-        # --- Generate video -----------------------------------------------
-        import torch
-        import librosa
-        import numpy as np
-        from PIL import Image
-        from longcat_video.utils.utils import save_video_ffmpeg
+        generator = torch.Generator(device=_local_rank).manual_seed(seed)
 
-        vocal_path = _extract_vocal(audio_path)
-        audio_data, sr = librosa.load(vocal_path, sr=16000)
+        # --- Vocal separation -----------------------------------------------
+        vocal_path  = _extract_vocal(audio_path)
+        speech_array, sr = librosa.load(vocal_path, sr=16000)
 
-        image = Image.open(image_path).convert("RGB")
-
-        generator = torch.Generator(device=_device).manual_seed(seed)
-
-        # Get audio embedding
-        audio_emb, audio_len_in_s = _pipeline.get_audio_embedding(
-            audio_data, sr, duration=None
+        # Pad audio to cover full generation duration
+        generate_duration = (
+            NUM_FRAMES / SAVE_FPS
+            + (num_segments - 1) * (NUM_FRAMES - NUM_COND_FRAMES) / SAVE_FPS
         )
+        source_duration = len(speech_array) / sr
+        pad_samples = math.ceil((generate_duration - source_duration) * sr)
+        if pad_samples > 0:
+            speech_array = np.append(speech_array, [0.0] * pad_samples)
 
-        # First segment
-        num_frames = 81
-        output = _pipeline(
-            prompt=prompt,
-            negative_prompt=neg_prompt,
-            image=image,
-            audio_emb=audio_emb,
-            num_frames=num_frames,
-            height=h,
-            width=w,
-            num_inference_steps=steps,
-            guidance_scale=guidance,
-            audio_guidance_scale=audio_guidance,
-            generator=generator,
-            mode=mode,
+        # --- Audio embedding ------------------------------------------------
+        full_audio_emb = _pipeline.get_audio_embedding(
+            speech_array, fps=SAVE_FPS * AUDIO_STRIDE,
+            device=_local_rank, sample_rate=sr
         )
-        video = output.frames[0]
+        audio_emb = _build_audio_emb(full_audio_emb, segment_idx=0, device=_local_rank)
 
-        # Continuation segments
-        for seg_i in range(continuation_segments):
-            seg_output = _pipeline.generate_avc(
-                prompt=prompt,
-                negative_prompt=neg_prompt,
-                audio_emb=audio_emb,
-                num_frames=num_frames,
-                height=h,
-                width=w,
+        # --- First segment --------------------------------------------------
+        image = PIL.Image.open(image_path).convert("RGB")
+
+        if mode == "at2v":
+            output, latent = _pipeline.generate_at2v(
+                prompt=prompt, negative_prompt=neg_prompt,
+                height=h, width=w, num_frames=NUM_FRAMES,
                 num_inference_steps=steps,
-                guidance_scale=guidance,
+                text_guidance_scale=text_guidance,
                 audio_guidance_scale=audio_guidance,
-                generator=generator,
-                previous_video=video,
+                generator=generator, output_type="both",
+                audio_emb=audio_emb,
             )
-            # Append new frames (skip overlap)
-            new_frames = seg_output.frames[0]
-            video = video + new_frames[1:]
+        else:
+            output, latent = _pipeline.generate_ai2v(
+                image=image,
+                prompt=prompt, negative_prompt=neg_prompt,
+                resolution=resolution, num_frames=NUM_FRAMES,
+                num_inference_steps=steps,
+                text_guidance_scale=text_guidance,
+                audio_guidance_scale=audio_guidance,
+                generator=generator, output_type="both",
+                audio_emb=audio_emb,
+            )
 
-        # Save video
-        ts = int(time.time())
-        out_path = os.path.join(OUTPUT_DIR, f"result_{ts}.mp4")
-        save_video_ffmpeg(video, out_path, audio_path=vocal_path, fps=16)
+        output = output[0]
+        video  = [(output[i] * 255).astype(np.uint8) for i in range(output.shape[0])]
+        video  = [PIL.Image.fromarray(img) for img in video]
+        ref_latent = latent[:, :, :1].clone()
+        all_frames = list(video)
 
-        # Encode result
+        # --- Continuation segments ------------------------------------------
+        for seg_i in range(1, num_segments):
+            audio_emb = _build_audio_emb(full_audio_emb, segment_idx=seg_i, device=_local_rank)
+
+            output, latent = _pipeline.generate_avc(
+                video=video, video_latent=latent,
+                prompt=prompt, negative_prompt=neg_prompt,
+                height=h, width=w,
+                num_frames=NUM_FRAMES, num_cond_frames=NUM_COND_FRAMES,
+                num_inference_steps=steps,
+                text_guidance_scale=text_guidance,
+                audio_guidance_scale=audio_guidance,
+                generator=generator, output_type="both",
+                use_kv_cache=True, offload_kv_cache=False, enhance_hf=True,
+                audio_emb=audio_emb,
+                ref_latent=ref_latent, ref_img_index=10, mask_frame_range=3,
+            )
+            output = output[0]
+            video  = [(output[i] * 255).astype(np.uint8) for i in range(output.shape[0])]
+            video  = [PIL.Image.fromarray(img) for img in video]
+            all_frames.extend(video[NUM_COND_FRAMES:])
+
+        # --- Save & encode --------------------------------------------------
+        ts       = int(time.time())
+        out_stem = os.path.join(OUTPUT_DIR, f"result_{ts}")
+        out_path = out_stem + ".mp4"
+
+        output_tensor = torch.from_numpy(np.array(all_frames))
+        save_video_ffmpeg(output_tensor, out_stem, vocal_path, fps=SAVE_FPS, quality=5)
+
         with open(out_path, "rb") as f:
             video_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-        # Cleanup temp files
-        for p in [image_path, audio_path]:
+        for p in [image_path, audio_path, vocal_path]:
             try:
                 os.remove(p)
             except OSError:
@@ -303,8 +382,8 @@ def handler(event):
 
         return {
             "video_base64": video_b64,
-            "duration_sec": round(len(video) / 16.0, 2),
-            "resolution": f"{w}x{h}",
+            "duration_sec": round(len(all_frames) / SAVE_FPS, 2),
+            "resolution":   f"{w}x{h}",
         }
 
     except Exception as e:
