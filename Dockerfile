@@ -2,11 +2,11 @@
 # Dockerfile — LongCat-Video Avatar  (RunPod Serverless / A100 optimised)
 # =============================================================================
 # Two-stage build:
-#   Stage 1  "builder"  — install Python deps + download model weights
+#   Stage 1  "builder"  — install Python deps
 #   Stage 2  "runtime"  — lean image with only what we need
 #
-# Model weights are downloaded from HuggingFace during build.
-# They are NOT expected to be in the Git repository.
+# Model weights are NOT baked into the image.
+# They are downloaded from HuggingFace on first cold start by handler.py.
 # =============================================================================
 
 # --------------- Stage 1: builder -------------------------------------------
@@ -34,30 +34,13 @@ RUN pip install --no-cache-dir \
     torchvision==0.21.0+cu124 \
     --index-url https://download.pytorch.org/whl/cu124
 
-# Install flash-attn via pre-built wheel (avoids long compilation; matched to cu124 + torch2.6 + py3.10)
-RUN pip install --no-cache-dir \
-    "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu124torch2.6cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"
+# Clone LongCat-Video source code (provides the longcat_video Python package)
+RUN git clone --depth 1 https://github.com/meituan-longcat/LongCat-Video /opt/longcat-repo
 
 # Install remaining deps
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt 2>/dev/null || \
     pip install --no-cache-dir -r /tmp/requirements.txt --ignore-installed torch torchaudio torchvision
-
-# Install huggingface-cli for model downloads
-RUN pip install --no-cache-dir huggingface_hub
-
-# --------------- Download model weights from HuggingFace --------------------
-RUN mkdir -p /weights/LongCat-Video /weights/LongCat-Video-Avatar
-
-# Download base model components (tokenizer, text_encoder, vae, scheduler)
-RUN huggingface-cli download meituan-longcat/LongCat-Video \
-    --local-dir /weights/LongCat-Video \
-    --include "tokenizer/*" "text_encoder/*" "vae/*" "scheduler/*"
-
-# Download avatar model components
-RUN huggingface-cli download meituan-longcat/LongCat-Video-Avatar \
-    --local-dir /weights/LongCat-Video-Avatar \
-    --include "avatar_single/*" "chinese-wav2vec2-base/*" "vocal_separator/*"
 
 # --------------- Stage 2: runtime -------------------------------------------
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
@@ -80,16 +63,14 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Application directory
 WORKDIR /app
 
-# Copy application code (repo source code, NOT weights)
+# Pre-create output and weights dirs (v2)
+RUN mkdir -p /app/outputs /app/audio_temp /app/repo/weights/LongCat-Video /app/repo/weights/LongCat-Video-Avatar
+
+# Copy application code
 COPY app.py handler.py ./
-COPY repo/ ./repo/
 
-# Copy downloaded weights into the expected location
-COPY --from=builder /weights/LongCat-Video     ./repo/weights/LongCat-Video/
-COPY --from=builder /weights/LongCat-Video-Avatar ./repo/weights/LongCat-Video-Avatar/
-
-# Pre-create output dirs
-RUN mkdir -p /app/outputs /app/audio_temp
+# Copy longcat_video source package from builder
+COPY --from=builder /opt/longcat-repo /app/repo
 
 # Expose Gradio port
 EXPOSE 7860
