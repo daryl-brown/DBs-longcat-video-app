@@ -37,6 +37,14 @@ RUN pip install --no-cache-dir \
 # Clone LongCat-Video source code (provides the longcat_video Python package)
 RUN git clone --depth 1 https://github.com/meituan-longcat/LongCat-Video /opt/longcat-repo
 
+# Install flash-attn — try pre-built wheel first, fall back to source compile
+# Pre-built wheels from: https://github.com/mjun0812/flash-attention-prebuild-wheels
+RUN pip install --no-cache-dir ninja packaging psutil && \
+    pip install --no-cache-dir \
+        https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.7.4+cu124torch2.6-cp310-cp310-linux_x86_64.whl \
+    2>/dev/null || \
+    pip install --no-cache-dir flash-attn==2.7.4.post1 --no-build-isolation
+
 # Install remaining deps
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt 2>/dev/null || \
