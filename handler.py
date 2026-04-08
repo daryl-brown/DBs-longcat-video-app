@@ -154,7 +154,7 @@ def _load_pipeline():
 
     print("[handler] Loading VAE …")
     vae = AutoencoderKLWan.from_pretrained(
-        BASE_MODEL_DIR, subfolder="vae", torch_dtype=torch.float32
+        BASE_MODEL_DIR, subfolder="vae", torch_dtype=dtype
     )
 
     print("[handler] Loading scheduler …")
@@ -282,10 +282,11 @@ def handler(event):
         prompt        = data.get("prompt", "")
         neg_prompt    = data.get("neg_prompt", NEG_PROMPT)
 
+        aspect = data.get("aspect_ratio", "16:9")
         if resolution == "720p":
-            h, w = 768, 1280
+            h, w = (768, 1280) if aspect == "16:9" else (1280, 768)
         else:
-            h, w = 480, 832
+            h, w = (480, 832) if aspect == "16:9" else (832, 480)
 
         generator = torch.Generator(device=_local_rank).manual_seed(seed)
 
